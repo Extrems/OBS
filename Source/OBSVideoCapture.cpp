@@ -31,6 +31,7 @@ extern "C"
 
 void Convert444toI420(LPBYTE input, int width, int pitch, int height, int startY, int endY, LPBYTE *output);
 void Convert444toNV12(LPBYTE input, int width, int inPitch, int outPitch, int height, int startY, int endY, LPBYTE *output);
+void Convert444toNV16(LPBYTE input, int width, int inPitch, int outPitch, int height, int startY, int endY, LPBYTE *output);
 
 
 DWORD STDCALL OBS::EncodeThread(LPVOID lpUnused)
@@ -50,10 +51,10 @@ struct Convert444Data
 {
     LPBYTE input;
     LPBYTE output[3];
-    bool bNV12;
+    bool bUsingQSV;
     bool bKillThread;
     HANDLE hSignalConvert, hSignalComplete;
-    int width, height, inPitch, outPitch, startY, endY;
+    int width, height, sampling, inPitch, outPitch, startY, endY;
     DWORD numThreads;
 };
 
@@ -64,8 +65,12 @@ DWORD STDCALL Convert444Thread(Convert444Data *data)
         WaitForSingleObject(data->hSignalConvert, INFINITE);
         if(data->bKillThread) break;
         profileParallelSegment("Convert444Thread", "Convert444Threads", data->numThreads);
-        if(data->bNV12)
+        if(data->bUsingQSV)
             Convert444toNV12(data->input, data->width, data->inPitch, data->outPitch, data->height, data->startY, data->endY, data->output);
+        else if(data->sampling == ChromaSampling_444)
+            memcpy(data->output[0], data->input, data->width*data->height*4);
+        else if(data->sampling == ChromaSampling_422)
+            Convert444toNV16(data->input, data->width, data->inPitch, data->width, data->height, data->startY, data->endY, data->output);
         else
             Convert444toNV12(data->input, data->width, data->inPitch, data->width, data->height, data->startY, data->endY, data->output);
 
@@ -544,7 +549,6 @@ void OBS::MainCaptureLoop()
     int curOutBuffer = 0;
 
     bool bUsingQSV = videoEncoder->isQSV();//GlobalConfig->GetInt(TEXT("Video Encoding"), TEXT("UseQSV")) != 0;
-    bUsing444 = false;
 
     EncoderPicture lastPic;
     EncoderPicture outPics[NUM_OUT_BUFFERS];
@@ -562,22 +566,14 @@ void OBS::MainCaptureLoop()
         {
             outPics[i].picOut = new x264_picture_t;
             x264_picture_init(outPics[i].picOut);
-        }
-    }
 
-    if(bUsing444)
-    {
-        for(int i=0; i<NUM_OUT_BUFFERS; i++)
-        {
-            outPics[i].picOut->img.i_csp   = X264_CSP_BGRA; //although the x264 input says BGR, x264 actually will expect packed UYV
-            outPics[i].picOut->img.i_plane = 1;
-        }
-    }
-    else
-    {
-        if(!bUsingQSV)
-            for(int i=0; i<NUM_OUT_BUFFERS; i++)
+            if(colorDesc.sampling == ChromaSampling_444)
+                x264_picture_alloc(outPics[i].picOut, X264_CSP_BGRA, outputCX, outputCY);
+            else if(colorDesc.sampling == ChromaSampling_422)
+                x264_picture_alloc(outPics[i].picOut, X264_CSP_NV16, outputCX, outputCY);
+            else
                 x264_picture_alloc(outPics[i].picOut, X264_CSP_NV12, outputCX, outputCY);
+        }
     }
 
     int bCongestionControl = AppConfig->GetInt (TEXT("Video Encoding"), TEXT("CongestionControl"), 0);
@@ -638,9 +634,10 @@ void OBS::MainCaptureLoop()
     {
         convertInfo[i].width  = outputCX;
         convertInfo[i].height = outputCY;
+        convertInfo[i].sampling = colorDesc.sampling;
         convertInfo[i].hSignalConvert  = CreateEvent(NULL, FALSE, FALSE, NULL);
         convertInfo[i].hSignalComplete = CreateEvent(NULL, FALSE, FALSE, NULL);
-        convertInfo[i].bNV12 = bUsingQSV;
+        convertInfo[i].bUsingQSV = bUsingQSV;
         convertInfo[i].numThreads = numThreads;
 
         if(i == 0)
@@ -658,7 +655,7 @@ void OBS::MainCaptureLoop()
     bool bFirstFrame = true;
     bool bFirstImage = true;
     bool bFirstEncode = true;
-    bool bUseThreaded420 = bUseMultithreadedOptimizations && (OSGetTotalCores() > 1) && !bUsing444;
+    bool bUseThreaded420 = bUseMultithreadedOptimizations && (OSGetTotalCores() > 1);
 
     List<HANDLE> completeEvents;
 
@@ -1052,52 +1049,53 @@ void OBS::MainCaptureLoop()
                     EncoderPicture &picOut = outPics[curOutBuffer];
                     EncoderPicture &nextPicOut = outPics[nextOutBuffer];
 
-                    if(!bUsing444)
+                    profileIn("conversion to 4:2:0");
+
+                    if(bUseThreaded420)
                     {
-                        profileIn("conversion to 4:2:0");
-
-                        if(bUseThreaded420)
+                        for(int i=0; i<numThreads; i++)
                         {
-                            for(int i=0; i<numThreads; i++)
-                            {
-                                convertInfo[i].input     = (LPBYTE)map.pData;
-                                convertInfo[i].inPitch   = map.RowPitch;
-                                if(bUsingQSV)
-                                {
-                                    mfxFrameData& data = nextPicOut.mfxOut->Data;
-                                    videoEncoder->RequestBuffers(&data);
-                                    convertInfo[i].outPitch  = data.Pitch;
-                                    convertInfo[i].output[0] = data.Y;
-                                    convertInfo[i].output[1] = data.UV;
-                                }
-                                else
-                                {
-                                    convertInfo[i].output[0] = nextPicOut.picOut->img.plane[0];
-                                    convertInfo[i].output[1] = nextPicOut.picOut->img.plane[1];
-                                    convertInfo[i].output[2] = nextPicOut.picOut->img.plane[2];
-								}
-                                SetEvent(convertInfo[i].hSignalConvert);
-                            }
-
-                            if(bFirstEncode)
-                                bFirstEncode = bEncode = false;
-                        }
-                        else
-                        {
+                            convertInfo[i].input     = (LPBYTE)map.pData;
+                            convertInfo[i].inPitch   = map.RowPitch;
                             if(bUsingQSV)
                             {
-                                mfxFrameData& data = picOut.mfxOut->Data;
+                                mfxFrameData& data = nextPicOut.mfxOut->Data;
                                 videoEncoder->RequestBuffers(&data);
-                                LPBYTE output[] = {data.Y, data.UV};
-                                Convert444toNV12((LPBYTE)map.pData, outputCX, map.RowPitch, data.Pitch, outputCY, 0, outputCY, output);
+                                convertInfo[i].outPitch  = data.Pitch;
+                                convertInfo[i].output[0] = data.Y;
+                                convertInfo[i].output[1] = data.UV;
                             }
                             else
-                                Convert444toNV12((LPBYTE)map.pData, outputCX, map.RowPitch, outputCX, outputCY, 0, outputCY, picOut.picOut->img.plane);
-                            prevTexture->Unmap(0);
+                            {
+                                convertInfo[i].output[0] = nextPicOut.picOut->img.plane[0];
+                                convertInfo[i].output[1] = nextPicOut.picOut->img.plane[1];
+                                convertInfo[i].output[2] = nextPicOut.picOut->img.plane[2];
+                            }
+                            SetEvent(convertInfo[i].hSignalConvert);
                         }
 
-                        profileOut;
+                        if(bFirstEncode)
+                            bFirstEncode = bEncode = false;
                     }
+                    else
+                    {
+                        if(bUsingQSV)
+                        {
+                            mfxFrameData& data = picOut.mfxOut->Data;
+                            videoEncoder->RequestBuffers(&data);
+                            LPBYTE output[] = {data.Y, data.UV};
+                            Convert444toNV12((LPBYTE)map.pData, outputCX, map.RowPitch, data.Pitch, outputCY, 0, outputCY, output);
+                        }
+                        else if(colorDesc.sampling == ChromaSampling_444)
+                            memcpy(picOut.picOut->img.plane[0], (LPBYTE)map.pData, outputCX*outputCY*4);
+                        else if(colorDesc.sampling == ChromaSampling_422)
+                            Convert444toNV16((LPBYTE)map.pData, outputCX, map.RowPitch, outputCX, outputCY, 0, outputCY, picOut.picOut->img.plane);
+                        else
+                            Convert444toNV12((LPBYTE)map.pData, outputCX, map.RowPitch, outputCX, outputCY, 0, outputCY, picOut.picOut->img.plane);
+                        prevTexture->Unmap(0);
+                    }
+
+                    profileOut;
 
                     if(bEncode)
                     {
@@ -1249,51 +1247,48 @@ void OBS::MainCaptureLoop()
 
     //encodeThreadProfiler.reset();
 
-    if(!bUsing444)
+    if(bUseThreaded420)
     {
-        if(bUseThreaded420)
+        for(int i=0; i<numThreads; i++)
         {
-            for(int i=0; i<numThreads; i++)
+            if(h420Threads[i])
             {
-                if(h420Threads[i])
-                {
-                    convertInfo[i].bKillThread = true;
-                    SetEvent(convertInfo[i].hSignalConvert);
+                convertInfo[i].bKillThread = true;
+                SetEvent(convertInfo[i].hSignalConvert);
 
-                    OSTerminateThread(h420Threads[i], 10000);
-                    h420Threads[i] = NULL;
-                }
-
-                if(convertInfo[i].hSignalConvert)
-                {
-                    CloseHandle(convertInfo[i].hSignalConvert);
-                    convertInfo[i].hSignalConvert = NULL;
-                }
-
-                if(convertInfo[i].hSignalComplete)
-                {
-                    CloseHandle(convertInfo[i].hSignalComplete);
-                    convertInfo[i].hSignalComplete = NULL;
-                }
+                OSTerminateThread(h420Threads[i], 10000);
+                h420Threads[i] = NULL;
             }
 
-            if(!bFirstEncode)
+            if(convertInfo[i].hSignalConvert)
             {
-                ID3D10Texture2D *copyTexture = copyTextures[curCopyTexture];
-                copyTexture->Unmap(0);
+                CloseHandle(convertInfo[i].hSignalConvert);
+                convertInfo[i].hSignalConvert = NULL;
+            }
+
+            if(convertInfo[i].hSignalComplete)
+            {
+                CloseHandle(convertInfo[i].hSignalComplete);
+                convertInfo[i].hSignalComplete = NULL;
             }
         }
 
-        if(bUsingQSV)
-            for(int i = 0; i < NUM_OUT_BUFFERS; i++)
-                delete outPics[i].mfxOut;
-        else
-            for(int i=0; i<NUM_OUT_BUFFERS; i++)
-            {
-                x264_picture_clean(outPics[i].picOut);
-                delete outPics[i].picOut;
-            }
+        if(!bFirstEncode)
+        {
+            ID3D10Texture2D *copyTexture = copyTextures[curCopyTexture];
+            copyTexture->Unmap(0);
+        }
     }
+
+    if(bUsingQSV)
+        for(int i = 0; i < NUM_OUT_BUFFERS; i++)
+            delete outPics[i].mfxOut;
+    else
+        for(int i=0; i<NUM_OUT_BUFFERS; i++)
+        {
+            x264_picture_clean(outPics[i].picOut);
+            delete outPics[i].picOut;
+        }
 
     Free(h420Threads);
     Free(convertInfo);

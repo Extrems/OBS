@@ -300,8 +300,8 @@ INT_PTR SettingsAdvanced::ProcMessage(UINT message, WPARAM wParam, LPARAM lParam
                 //--------------------------------------------
 
                 hwndTemp = GetDlgItem(hwnd, IDC_X264PROFILE);
-                static const CTSTR profile_names[3] = {TEXT("main"), TEXT("high")};
-                for(int i=0; i<2; i++)
+                static const CTSTR profile_names[5] = {TEXT("baseline"), TEXT("main"), TEXT("high"), TEXT("high422"), TEXT("high444")};
+                for(int i=0; i<5; i++)
                     SendMessage(hwndTemp, CB_ADDSTRING, 0, (LPARAM)profile_names[i]);
 
                 LoadSettingComboString(hwndTemp, TEXT("Video Encoding"), TEXT("X264Profile"), TEXT("high"));

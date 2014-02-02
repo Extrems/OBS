@@ -117,7 +117,7 @@ class X264Encoder : public VideoEncoder
     }
 
 public:
-    X264Encoder(int fps, int width, int height, int quality, CTSTR preset, bool bUse444, ColorDescription &colorDesc, int maxBitrate, int bufferSize, bool bUseCFR)
+    X264Encoder(int fps, int width, int height, int quality, CTSTR preset, ColorDescription &colorDesc, int maxBitrate, int bufferSize, bool bUseCFR)
     {
         curPreset = preset;
 
@@ -218,10 +218,12 @@ public:
         paramData.b_vfr_input           = !bUseCFR;
         paramData.i_width               = width;
         paramData.i_height              = height;
+
         paramData.vui.b_fullrange       = colorDesc.fullRange;
         paramData.vui.i_colorprim       = colorDesc.primaries;
         paramData.vui.i_transfer        = colorDesc.transfer;
         paramData.vui.i_colmatrix       = colorDesc.matrix;
+        paramData.vui.i_chroma_loc      = colorDesc.location;
 
         if (keyframeInterval)
             paramData.i_keyint_max      = fps*keyframeInterval;
@@ -263,13 +265,23 @@ public:
             }
         }
 
-        if(bUse444) paramData.i_csp = X264_CSP_I444;
-        else paramData.i_csp = X264_CSP_I420;
+        if(curProfile.CompareI(TEXT("high444")))
+            colorDesc.sampling = ChromaSampling_444;
+        else if(curProfile.CompareI(TEXT("high422")))
+            colorDesc.sampling = ChromaSampling_422;
+
+        switch(colorDesc.sampling)
+        {
+            case ChromaSampling_444: paramData.i_csp = X264_CSP_BGRA; break;
+            case ChromaSampling_422: paramData.i_csp = X264_CSP_NV16; break;
+            case ChromaSampling_420: paramData.i_csp = X264_CSP_NV12; break;
+        }
 
         colorDesc.fullRange = paramData.vui.b_fullrange;
         colorDesc.primaries = paramData.vui.i_colorprim;
         colorDesc.transfer  = paramData.vui.i_transfer;
         colorDesc.matrix    = paramData.vui.i_colmatrix;
+        colorDesc.location  = paramData.vui.i_chroma_loc;
 
         if (curProfile)
         {
@@ -579,8 +591,8 @@ public:
 };
 
 
-VideoEncoder* CreateX264Encoder(int fps, int width, int height, int quality, CTSTR preset, bool bUse444, ColorDescription &colorDesc, int maxBitRate, int bufferSize, bool bUseCFR)
+VideoEncoder* CreateX264Encoder(int fps, int width, int height, int quality, CTSTR preset, ColorDescription &colorDesc, int maxBitRate, int bufferSize, bool bUseCFR)
 {
-    return new X264Encoder(fps, width, height, quality, preset, bUse444, colorDesc, maxBitRate, bufferSize, bUseCFR);
+    return new X264Encoder(fps, width, height, quality, preset, colorDesc, maxBitRate, bufferSize, bUseCFR);
 }
 

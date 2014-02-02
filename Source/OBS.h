@@ -380,6 +380,16 @@ enum
 
 //----------------------------
 
+enum VideoFormat
+{
+    VideoFormat_Component = 0,
+    VideoFormat_PAL,
+    VideoFormat_NTSC,
+    VideoFormat_SECAM,
+    VideoFormat_MAC,
+    VideoFormat_Unspecified
+};
+
 enum ColorPrimaries
 {
     ColorPrimaries_BT709 = 1,
@@ -424,12 +434,31 @@ enum ColorMatrix
     ColorMatrix_BT2020CL
 };
 
+enum ChromaLocation
+{
+    ChromaLocation_Left = 0,
+    ChromaLocation_Center,
+    ChromaLocation_TopLeft,
+    ChromaLocation_Top,
+    ChromaLocation_BottomLeft,
+    ChromaLocation_Bottom
+};
+
+enum ChromaSampling
+{
+    ChromaSampling_444 = 0,
+    ChromaSampling_422,
+    ChromaSampling_420
+};
+
 struct ColorDescription
 {
     int fullRange;
     int primaries;
     int transfer;
     int matrix;
+    int location;
+    int sampling;
 };
 
 //----------------------------
@@ -697,7 +726,6 @@ private:
     float   downscale;
     int     downscaleType;
     UINT    frameTime, fps;
-    bool    bUsing444;
     ColorDescription colorDesc;
 
     //---------------------------------------------------

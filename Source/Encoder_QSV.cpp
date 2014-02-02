@@ -355,7 +355,7 @@ class QSVEncoder : public VideoEncoder
 
 public:
 
-    QSVEncoder(int fps, int width, int height, int quality, CTSTR preset, bool bUse444, ColorDescription &colorDesc, int maxBitrate, int bufferSize, bool bUseCFR_)
+    QSVEncoder(int fps, int width, int height, int quality, CTSTR preset, ColorDescription &colorDesc, int maxBitrate, int bufferSize, bool bUseCFR_)
         : fps(fps), bFirstFrameProcessed(false), width(width), height(height), max_bitrate(maxBitrate)
     {
         bUseCBR = AppConfig->GetInt(TEXT("Video Encoding"), TEXT("UseCBR")) != 0;
@@ -1037,7 +1037,7 @@ public:
     }
 };
 
-VideoEncoder* CreateQSVEncoder(int fps, int width, int height, int quality, CTSTR preset, bool bUse444, ColorDescription &colorDesc, int maxBitRate, int bufferSize, bool bUseCFR, String &errors)
+VideoEncoder* CreateQSVEncoder(int fps, int width, int height, int quality, CTSTR preset, ColorDescription &colorDesc, int maxBitRate, int bufferSize, bool bUseCFR, String &errors)
 {
     if (!CheckQSVHardwareSupport())
     {
@@ -1072,5 +1072,5 @@ VideoEncoder* CreateQSVEncoder(int fps, int width, int height, int quality, CTST
         }
     }
 
-    return new QSVEncoder(fps, width, height, quality, preset, bUse444, colorDesc, maxBitRate, bufferSize, bUseCFR);
+    return new QSVEncoder(fps, width, height, quality, preset, colorDesc, maxBitRate, bufferSize, bUseCFR);
 }

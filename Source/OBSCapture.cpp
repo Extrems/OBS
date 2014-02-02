@@ -21,9 +21,9 @@
 #include <time.h>
 #include <Avrt.h>
 
-VideoEncoder* CreateX264Encoder(int fps, int width, int height, int quality, CTSTR preset, bool bUse444, ColorDescription &colorDesc, int maxBitRate, int bufferSize, bool bUseCFR);
-VideoEncoder* CreateQSVEncoder(int fps, int width, int height, int quality, CTSTR preset, bool bUse444, ColorDescription &colorDesc, int maxBitRate, int bufferSize, bool bUseCFR, String &errors);
-VideoEncoder* CreateNVENCEncoder(int fps, int width, int height, int quality, CTSTR preset, bool bUse444, ColorDescription &colorDesc, int maxBitRate, int bufferSize, bool bUseCFR, String &errors);
+VideoEncoder* CreateX264Encoder(int fps, int width, int height, int quality, CTSTR preset, ColorDescription &colorDesc, int maxBitRate, int bufferSize, bool bUseCFR);
+VideoEncoder* CreateQSVEncoder(int fps, int width, int height, int quality, CTSTR preset, ColorDescription &colorDesc, int maxBitRate, int bufferSize, bool bUseCFR, String &errors);
+VideoEncoder* CreateNVENCEncoder(int fps, int width, int height, int quality, CTSTR preset, ColorDescription &colorDesc, int maxBitRate, int bufferSize, bool bUseCFR, String &errors);
 AudioEncoder* CreateMP3Encoder(UINT bitRate);
 AudioEncoder* CreateAACEncoder(UINT bitRate);
 
@@ -591,8 +591,7 @@ retryHookTestV2:
     int bufferSize = AppConfig->GetInt   (TEXT("Video Encoding"), TEXT("BufferSize"), 1000);
     int quality    = AppConfig->GetInt   (TEXT("Video Encoding"), TEXT("Quality"),    8);
     String preset  = AppConfig->GetString(TEXT("Video Encoding"), TEXT("Preset"),     TEXT("veryfast"));
-    bUsing444      = false;//AppConfig->GetInt   (TEXT("Video Encoding"), TEXT("Use444"),     0) != 0;
-    bUseCFR        = AppConfig->GetInt(TEXT("Video Encoding"), TEXT("UseCFR"), 1) != 0;
+    bUseCFR        = AppConfig->GetInt   (TEXT("Video Encoding"), TEXT("UseCFR"),     1) != 0;
 
     //-------------------------------------------------------------
 
@@ -619,17 +618,19 @@ retryHookTestV2:
     colorDesc.primaries = ColorPrimaries_BT709;
     colorDesc.transfer  = ColorTransfer_IEC6196621;
     colorDesc.matrix    = outputCX >= 1280 || outputCY > 576 ? ColorMatrix_BT709 : ColorMatrix_SMPTE170M;
+    colorDesc.location  = ChromaLocation_Center;
+    colorDesc.sampling  = ChromaSampling_420;
 
     videoEncoder = nullptr;
     String videoEncoderErrors;
     if (bDisableEncoding)
         videoEncoder = CreateNullVideoEncoder();
     else if(AppConfig->GetInt(TEXT("Video Encoding"), TEXT("UseQSV")) != 0)
-        videoEncoder = CreateQSVEncoder(fps, outputCX, outputCY, quality, preset, bUsing444, colorDesc, maxBitRate, bufferSize, bUseCFR, videoEncoderErrors);
+        videoEncoder = CreateQSVEncoder(fps, outputCX, outputCY, quality, preset, colorDesc, maxBitRate, bufferSize, bUseCFR, videoEncoderErrors);
     else if(AppConfig->GetInt(TEXT("Video Encoding"), TEXT("UseNVENC")) != 0)
-        videoEncoder = CreateNVENCEncoder(fps, outputCX, outputCY, quality, preset, bUsing444, colorDesc, maxBitRate, bufferSize, bUseCFR, videoEncoderErrors);
+        videoEncoder = CreateNVENCEncoder(fps, outputCX, outputCY, quality, preset, colorDesc, maxBitRate, bufferSize, bUseCFR, videoEncoderErrors);
     else
-        videoEncoder = CreateX264Encoder(fps, outputCX, outputCY, quality, preset, bUsing444, colorDesc, maxBitRate, bufferSize, bUseCFR);
+        videoEncoder = CreateX264Encoder(fps, outputCX, outputCY, quality, preset, colorDesc, maxBitRate, bufferSize, bUseCFR);
 
     if (!videoEncoder)
     {

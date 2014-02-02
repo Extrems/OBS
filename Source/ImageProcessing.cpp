@@ -117,3 +117,46 @@ void Convert444toNV12(LPBYTE input, int width, int inPitch, int outPitch, int he
         }
     }
 }
+
+void Convert444toNV16(LPBYTE input, int width, int inPitch, int outPitch, int height, int startY, int endY, LPBYTE *output)
+{
+    profileSegment("Convert444toNV16");
+    LPBYTE lumPlane     = output[0];
+    LPBYTE uvPlane		= output[1];
+
+    __m128i lumMask = _mm_set1_epi32(0x0000FF00);
+    __m128i uvMask = _mm_set1_epi16(0x00FF);
+
+    for(int y=startY; y<endY; y++)
+    {
+        int yPos    = y*inPitch;
+        int uvYPos  = y*outPitch;
+        int lumYPos = y*outPitch;
+
+        for(int x=0; x<width; x+=4)
+        {
+            LPBYTE lpImagePos = input+yPos+(x*4);
+            int uvPos  = uvYPos + x;
+            int lumPos = lumYPos + x;
+
+            __m128i line = _mm_load_si128((__m128i*)lpImagePos);
+
+            //pack lum vals
+            {
+                __m128i packVal = _mm_packs_epi32(_mm_srli_si128(_mm_and_si128(line, lumMask), 1), _mm_setzero_si128());
+                packVal = _mm_packus_epi16(packVal, packVal);
+
+                *(LPUINT)(lumPlane+lumPos) = packVal.m128i_u32[0];
+            }
+
+            //do average, pack UV vals
+            {
+                __m128i addVal = _mm_and_si128(line, uvMask);
+                __m128i avgVal = _mm_srai_epi16(_mm_add_epi64(addVal, _mm_shuffle_epi32(addVal, _MM_SHUFFLE(2, 3, 0, 1))), 1);
+                avgVal = _mm_shuffle_epi32(avgVal, _MM_SHUFFLE(3, 1, 2, 0));
+
+                *(LPUINT)(uvPlane+uvPos) = _mm_packus_epi16(avgVal, avgVal).m128i_u32[0];
+            }
+        }
+    }
+}
